@@ -121,8 +121,14 @@ class TransformersConverter(Converter):
 
             # If lite whisper use corresponding openai tokenizer
             if config.model_type == "lite-whisper":
-                base_name = self._model_name_or_path.split("/")[-1]  # e.g., "lite-whisper-large-v3"
-                base_name = base_name.replace("lite-", "")           # e.g., "whisper-large-v3"
+                base_name = self._model_name_or_path.split("/")[-1]
+                # Replace "lite-" with "" and remove variant suffixes (-acc, -fast, etc.)
+                base_name = base_name.replace("lite-", "", 1)
+                # Remove variant suffixes to get base model name
+                for suffix in ["-acc", "-fast"]:
+                    if base_name.endswith(suffix):
+                        base_name = base_name[:-len(suffix)]
+                        break
                 tokenizer_path = f"openai/{base_name}"
             else:
                 tokenizer_path = self._model_name_or_path
