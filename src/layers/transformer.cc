@@ -485,6 +485,11 @@ namespace ctranslate2 {
     }
 
     TransformerDecoder::TransformerDecoder(const models::Model& model, const std::string& scope)
+      : TransformerDecoder(model, scope, model.use_flash_attention()) {
+    }
+
+    TransformerDecoder::TransformerDecoder(const models::Model& model, const std::string& scope,
+                                           const bool use_flash_attention)
       : Decoder(model.device())
       , _num_heads(model.get_attribute_with_default<int32_t>(scope + "/num_heads", 8))
       , _compute_type(model.effective_compute_type())
@@ -497,7 +502,7 @@ namespace ctranslate2 {
       , _project_in(build_optional_layer<Dense>(model, scope + "/project_in"))
       , _project_out(build_optional_layer<Dense>(model, scope + "/project_out"))
       , _alibi(make_alibi(model, scope))
-      , _use_flash_attention(model.use_flash_attention())
+      , _use_flash_attention(use_flash_attention)
       , _layers(build_layers_list<const TransformerDecoderLayer>(
                   model,
                   scope + "/layer",

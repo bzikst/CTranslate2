@@ -197,6 +197,10 @@ namespace ctranslate2 {
       }
 
     protected:
+      TransformerDecoder(const models::Model& model,
+                         const std::string& scope,
+                         const bool use_flash_attention);
+
       Dense& output_layer() override {
         return _proj;
       }

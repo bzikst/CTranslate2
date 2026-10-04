@@ -1,4 +1,5 @@
 #include "ctranslate2/models/model_reader.h"
+#include "model_shards.h"
 
 #include "ctranslate2/filesystem.h"
 
@@ -29,8 +30,14 @@ namespace ctranslate2 {
       const std::string path = _model_dir + "/" + filename;
       const std::ios_base::openmode mode = binary ? std::ios_base::binary : std::ios_base::in;
       auto stream = std::make_unique<std::ifstream>(open_file_read(path, mode, /*check=*/false));
-      if (!stream || !(*stream))
+      if (!stream || !(*stream)) {
+        if (filename == "model.bin") {
+          auto index = open_file_read(path + ".index.json", std::ios::binary, /*check=*/false);
+          if (index)
+            return std::make_unique<ModelShardStream>(_model_dir, index);
+        }
         return nullptr;
+      }
       return stream;
     }
 

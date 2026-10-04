@@ -6,6 +6,11 @@ namespace ctranslate2 {
     static const ops::ActivationType activation_type = ops::ActivationType::GELU;
 
     WhisperEncoder::WhisperEncoder(const models::Model& model, const std::string& scope)
+      : WhisperEncoder(model, scope, model.use_flash_attention()) {
+    }
+
+    WhisperEncoder::WhisperEncoder(const models::Model& model, const std::string& scope,
+                                   const bool use_flash_attention)
       : _conv1(model, scope + "/conv1", /*stride=*/1, /*padding=*/1,
                /*dilation=*/1, /*groups=*/1, &activation_type)
       , _conv2(model, scope + "/conv2", /*stride=*/2, /*padding=*/1,
@@ -17,7 +22,7 @@ namespace ctranslate2 {
                                                                  scope + "/layer",
                                                                  _num_heads,
                                                                  /*pre_norm=*/true,
-                                                                 ops::ActivationType::GELU))
+                                                                 ops::ActivationType::GELU, use_flash_attention))
       , _output_norm(model, scope + "/layer_norm")
     {
     }

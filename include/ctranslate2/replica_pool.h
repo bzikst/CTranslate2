@@ -153,6 +153,11 @@ namespace ctranslate2 {
     }
 
   protected:
+    Replica& get_replica(size_t index) {
+      auto& worker = static_cast<ReplicaWorker<Replica>&>(_thread_pool->get_worker(index));
+      return worker.replica();
+    }
+
     template <typename Result, typename Func>
     std::vector<std::future<Result>>
     post_examples(const std::vector<Example>& examples,

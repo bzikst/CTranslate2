@@ -1,5 +1,8 @@
 #pragma once
 
+#include <tuple>
+#include <utility>
+
 #include "ctranslate2/ops/activation.h"
 #include "ctranslate2/ops/ops.h"
 #include "ctranslate2/models/model.h"
@@ -122,6 +125,11 @@ namespace ctranslate2 {
       StorageView _encoding;
     };
 
+    // Buffer name, shape, dtype, live bytes, reserved capacity bytes.
+    using DenseDerivedBufferStats =
+      std::vector<std::tuple<std::string, Shape, std::string, dim_t, dim_t>>;
+    using DecoderCacheResetStats = std::pair<DenseDerivedBufferStats, DenseDerivedBufferStats>;
+
     class Dense : public Layer
     {
     public:
@@ -133,6 +141,8 @@ namespace ctranslate2 {
       dim_t output_size() const override;
       void operator()(const StorageView& input, StorageView& output, const StorageView* residual = nullptr) const;
       void select_weights(const StorageView* index, const StorageView* extra_bias = nullptr);
+      DenseDerivedBufferStats derived_buffer_stats() const;
+      void release_derived_buffers();
     private:
       bool _packed_weight;
       const StorageView& _weight;

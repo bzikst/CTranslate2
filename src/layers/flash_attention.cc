@@ -110,7 +110,7 @@ namespace ctranslate2 {
 
       // init output
       StorageView context(dtype, device);
-      ops::FlashAttention fl_attn_ops(_queries_scale, _sliding_window);
+      ops::FlashAttention fl_attn_ops(_queries_scale, _sliding_window, _is_decoder);
       fl_attn_ops(queries_proj, keys_proj, values_proj, context, cached_keys, cached_values, attention,
                   return_normalized_attention, rotary_cos, rotary_sin, rotary_interleaved, nullptr/*alibli*/, offset);
 

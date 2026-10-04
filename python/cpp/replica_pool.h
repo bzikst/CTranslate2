@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <shared_mutex>
 #include <ctranslate2/replica_pool.h>
 
@@ -69,6 +70,68 @@ namespace ctranslate2 {
         _model_is_loaded = true;
       }
 
+    protected:
+      // Creates additional workers that share the loaded model instances of an
+      // existing pool (the weights are neither copied nor reloaded).
+      // The source pool must be loaded, idle, and run on a single CUDA device
+      // without tensor parallel. The source pool, its loader and its models are
+      // never modified. The GIL is not managed here: Python callers must release
+      // it around this constructor to avoid a double release.
+      ReplicaPoolHelper(ReplicaPoolHelper& source, size_t inter_threads)
+        : _model_loader(source._model_loader)
+        , _pool_config(source._pool_config)
+        , _device(source._device)
+        , _num_replicas_per_device(inter_threads)
+        , _device_index(source._device_index)
+        , _is_forked_child(true)
+      {
+        // Hold the source state lock so that the model cannot be unloaded or
+        // reloaded while the shared model pointers are captured.
+        std::shared_lock lock(source._mutex);
+
+        if (!source._model_is_loaded)
+          throw std::runtime_error("Cannot fork a pool whose model is not loaded");
+        if (source._pool->num_active_batches() > 0)
+          throw std::runtime_error("Cannot fork a pool while batches are being processed");
+        if (source._device != Device::CUDA)
+          throw std::runtime_error("Forking a pool is only supported on the CUDA device");
+        if (source._device_index.size() != 1)
+          throw std::runtime_error("Forking a pool is only supported with a single device index");
+        if (source._model_loader.tensor_parallel)
+          throw std::runtime_error("Cannot fork a pool running with tensor parallel");
+        if (inter_threads != 2)
+          throw std::invalid_argument("Forked pools only support 2 workers per device");
+
+        // Both workers of the forked pool hold the same shared_ptr as the source
+        // pool, so the model instances and weights are shared, not duplicated.
+        const std::vector<std::shared_ptr<const models::Model>> shared_models(inter_threads,
+                                                                              source.model());
+
+        // Only this copy of the loader describes the new replica count.
+        _model_loader.num_replicas_per_device = inter_threads;
+
+        _pool = std::make_unique<T>(shared_models, _pool_config);
+        _model_is_loaded = true;
+      }
+
+      // The caller must serialize all submissions: encode does not hold _mutex.
+      auto reset_fork_decoder_cache_impl() {
+        std::unique_lock lock(_mutex);
+        if (!_is_forked_child)
+          throw std::runtime_error("Decoder cache reset is only supported on a forked pool");
+        assert_model_is_ready();
+        if (_device != Device::CUDA)
+          throw std::runtime_error("Forked decoder cache reset requires the CUDA device");
+        if (_device_index.size() != 1)
+          throw std::runtime_error("Forked decoder cache reset requires a single device index");
+        if (_model_loader.tensor_parallel)
+          throw std::runtime_error("Cannot reset forked decoder cache with tensor parallel");
+        if (_pool->num_active_batches() != 0 || _pool->num_queued_batches() != 0)
+          throw std::runtime_error("Cannot reset forked decoder cache while batches are active or queued");
+        return _pool->reset_decoder_cache();
+      }
+
+    public:
       ~ReplicaPoolHelper() {
         pybind11::gil_scoped_release nogil;
         _pool.reset();
@@ -105,6 +168,15 @@ namespace ctranslate2 {
       bool model_is_loaded() {
         std::shared_lock lock(_mutex);
         return _model_is_loaded;
+      }
+
+      // Raw address of the model instance backing the first replica. Equal values
+      // in a source pool and a pool forked from it prove at runtime that both
+      // pools share the same weights.
+      uintptr_t model_identity() {
+        std::shared_lock lock(_mutex);
+        assert_model_is_ready();
+        return reinterpret_cast<uintptr_t>(model().get());
       }
 
       void unload_model(const bool to_cpu) {
@@ -164,6 +236,7 @@ namespace ctranslate2 {
       std::vector<int> _device_index;
       std::vector<std::shared_ptr<const models::Model>> _cached_models;
       bool _model_is_loaded;
+      const bool _is_forked_child = false;
 
       // Use a shared mutex to protect the model state (loaded/unloaded).
       // Multiple threads can read the model at the same time, but a single thread can change
