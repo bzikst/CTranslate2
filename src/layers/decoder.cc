@@ -69,6 +69,15 @@ namespace ctranslate2 {
       return true;
     }
 
+    DecoderCacheResetStats Decoder::reset_derived_cache() {
+      auto& layer = output_layer();
+      auto before = layer.derived_buffer_stats();
+      layer.release_derived_buffers();
+      _to_original_word_id.clear();
+      _to_output_word_id.clear();
+      return {std::move(before), layer.derived_buffer_stats()};
+    }
+
     void Decoder::update_output_layer(const dim_t size_multiple,
                                       const std::vector<size_t>& restrict_ids) {
       const dim_t current_output_size = output_size();

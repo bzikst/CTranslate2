@@ -8,6 +8,8 @@ namespace ctranslate2 {
     class WhisperEncoder : public Layer {
     public:
       WhisperEncoder(const models::Model& model, const std::string& scope);
+      WhisperEncoder(const models::Model& model, const std::string& scope,
+                     const bool use_flash_attention);
 
       void operator()(const StorageView& features, StorageView& output);
 
@@ -54,7 +56,9 @@ namespace ctranslate2 {
 
     class WhisperDecoder : public TransformerDecoder {
     public:
-      using TransformerDecoder::TransformerDecoder;
+      WhisperDecoder(const models::Model& model, const std::string& scope)
+        : TransformerDecoder(model, scope, /*use_flash_attention=*/false) {
+      }
 
       bool return_normalized_attention() const override {
         return false;

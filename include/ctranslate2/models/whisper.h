@@ -105,6 +105,8 @@ namespace ctranslate2 {
 
       WhisperReplica(const std::shared_ptr<const WhisperModel>& model);
 
+      layers::DecoderCacheResetStats reset_decoder_cache();
+
       bool is_multilingual() const {
         return _is_multilingual;
       }
@@ -118,6 +120,7 @@ namespace ctranslate2 {
       }
 
       StorageView encode(StorageView features, const bool to_cpu);
+      StorageView encode(StorageView features, const bool to_cpu, const bool allow_flash_attention);
 
       std::vector<WhisperGenerationResult>
       generate(StorageView features,
@@ -142,6 +145,7 @@ namespace ctranslate2 {
     private:
       const std::shared_ptr<const WhisperModel> _model;
       const std::unique_ptr<layers::WhisperEncoder> _encoder;
+      const std::unique_ptr<layers::WhisperEncoder> _dense_encoder;
       const std::unique_ptr<layers::WhisperDecoder> _decoder;
 
       size_t _sot_id;
@@ -159,11 +163,15 @@ namespace ctranslate2 {
     public:
       using ReplicaPool::ReplicaPool;
 
+      std::vector<layers::DecoderCacheResetStats> reset_decoder_cache();
+
       bool is_multilingual() const;
       size_t n_mels() const;
       size_t num_languages() const;
 
       std::future<StorageView> encode(const StorageView& features, const bool to_cpu);
+      std::future<StorageView> encode(const StorageView& features, const bool to_cpu,
+                                      const bool allow_flash_attention);
 
       std::vector<std::future<WhisperGenerationResult>>
       generate(const StorageView& features,

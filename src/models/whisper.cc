@@ -60,6 +60,9 @@ namespace ctranslate2 {
       : ModelReplica(model)
       , _model(model)
       , _encoder(std::make_unique<layers::WhisperEncoder>(*model, "encoder"))
+      , _dense_encoder(model->use_flash_attention()
+                         ? std::make_unique<layers::WhisperEncoder>(*model, "encoder", false)
+                         : nullptr)
       , _decoder(std::make_unique<layers::WhisperDecoder>(*model, "decoder"))
     {
       const auto& vocabulary = model->get_vocabulary();
@@ -78,6 +81,11 @@ namespace ctranslate2 {
     }
 
     StorageView WhisperReplica::encode(StorageView features, const bool to_cpu) {
+      return encode(std::move(features), to_cpu, /*allow_flash_attention=*/true);
+    }
+
+    StorageView WhisperReplica::encode(StorageView features, const bool to_cpu,
+                                       const bool allow_flash_attention) {
       PROFILE("WhisperReplica::encode");
 
 #ifdef CT2_WITH_CUDA
@@ -85,12 +93,13 @@ namespace ctranslate2 {
 #endif
 
       const auto scoped_device_setter = _model->get_scoped_device_setter();
+      auto& encoder = (!allow_flash_attention && _dense_encoder) ? *_dense_encoder : *_encoder;
       const Device device = _model->device();
-      const DataType dtype = _encoder->output_type();
+      const DataType dtype = encoder.output_type();
       features.move_to(device, dtype);
 
       StorageView encoder_output(dtype, device);
-      (*_encoder)(features, encoder_output);
+      encoder(features, encoder_output);
 
       if (to_cpu) {
         if (device != Device::CPU)
@@ -657,6 +666,31 @@ namespace ctranslate2 {
     }
 
 
+    layers::DecoderCacheResetStats WhisperReplica::reset_decoder_cache() {
+      return _decoder->reset_derived_cache();
+    }
+
+    std::vector<layers::DecoderCacheResetStats> Whisper::reset_decoder_cache() {
+      if (num_active_batches() != 0 || num_queued_batches() != 0)
+        throw std::runtime_error("Cannot reset decoder cache while batches are active or queued");
+      const auto& model = get_first_replica().model();
+      if (model->device() != Device::CUDA)
+        throw std::runtime_error("Decoder cache reset requires the CUDA device");
+#ifdef CT2_WITH_CUDA
+      const auto scoped_device_setter = model->get_scoped_device_setter();
+      // Idle job counters do not imply completion of asynchronous GPU work.
+      CUDA_CHECK(cudaDeviceSynchronize());
+      std::vector<layers::DecoderCacheResetStats> stats;
+      for (size_t i = 0; i < num_replicas(); ++i) {
+        stats.emplace_back(get_replica(i).reset_decoder_cache());
+      }
+      CUDA_CHECK(cudaDeviceSynchronize());
+      return stats;
+#else
+      throw std::runtime_error("Decoder cache reset requires CUDA support");
+#endif
+    }
+
     bool Whisper::is_multilingual() const {
       const auto& replica = get_first_replica();
       return replica.is_multilingual();
@@ -673,9 +707,14 @@ namespace ctranslate2 {
     }
 
     std::future<StorageView> Whisper::encode(const StorageView& features, const bool to_cpu) {
+      return encode(features, to_cpu, /*allow_flash_attention=*/true);
+    }
+
+    std::future<StorageView> Whisper::encode(const StorageView& features, const bool to_cpu,
+                                             const bool allow_flash_attention) {
       return post<StorageView>(
-        [features = features.sync_copy(), to_cpu](WhisperReplica& replica) mutable {
-          return replica.encode(std::move(features), to_cpu);
+        [features = features.sync_copy(), to_cpu, allow_flash_attention](WhisperReplica& replica) mutable {
+          return replica.encode(std::move(features), to_cpu, allow_flash_attention);
         });
     }
 
