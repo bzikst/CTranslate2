@@ -56,6 +56,8 @@ namespace ctranslate2 {
       void update_output_layer(const dim_t size_multiple = 1,
                                const std::vector<size_t>& restrict_ids = {});
 
+      DecoderCacheResetStats reset_derived_cache();
+
       bool output_layer_is_updated() const {
         return !_to_original_word_id.empty();
       }

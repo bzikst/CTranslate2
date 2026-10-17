@@ -11,6 +11,22 @@ namespace ctranslate2 {
     public:
       using ReplicaPoolHelper::ReplicaPoolHelper;
 
+      // Builds a pool whose workers share the loaded model instances of an
+      // existing pool. Exposed to Python through fork_pool() only.
+      WhisperWrapper(WhisperWrapper& source, size_t inter_threads)
+        : ReplicaPoolHelper(source, inter_threads) {
+      }
+
+      // Returns a new instance with 2 workers sharing the weights of this
+      // instance; this instance is left fully unchanged.
+      std::unique_ptr<WhisperWrapper> fork_pool() {
+        return std::make_unique<WhisperWrapper>(*this, 2);
+      }
+
+      auto reset_fork_decoder_cache() {
+        return reset_fork_decoder_cache_impl();
+      }
+
       bool is_multilingual() const {
         return _pool->is_multilingual();
       }
@@ -23,8 +39,9 @@ namespace ctranslate2 {
         return _pool->num_languages();
       }
 
-      StorageView encode(const StorageView& features, const bool to_cpu) {
-        return _pool->encode(features, to_cpu).get();
+      StorageView encode(const StorageView& features, const bool to_cpu,
+                         const bool allow_flash_attention) {
+        return _pool->encode(features, to_cpu, allow_flash_attention).get();
       }
 
       std::variant<std::vector<models::WhisperGenerationResult>,
@@ -208,6 +225,33 @@ namespace ctranslate2 {
                      :obj:`model_path` acts as an identifier for this model.
              )pbdoc")
 
+        .def("fork_pool", &WhisperWrapper::fork_pool,
+             py::call_guard<py::gil_scoped_release>(),
+             R"pbdoc(
+                 Returns a new Whisper instance with 2 workers sharing the weights of this instance.
+
+                 The model is not copied or reloaded: the returned instance runs on the same loaded
+                 model. This instance is left unchanged and keeps its workers and threads. The
+                 method requires the model to be loaded and idle on a single CUDA device without
+                 tensor parallel, and the model must not be unloaded or reloaded on either instance
+                 while the other one is in use.
+             )pbdoc")
+
+        .def("reset_fork_decoder_cache", &WhisperWrapper::reset_fork_decoder_cache,
+             py::call_guard<py::gil_scoped_release>(),
+             R"pbdoc(
+                 Releases private derived decoder projection buffers of this forked pool.
+
+                 Requires a loaded, idle forked pool on one CUDA device without tensor parallel.
+                 The caller must externally serialize all submissions, including encode.
+                 Checked device-wide synchronization brackets release. Shared weights, workers,
+                 handles, random generators, and the primary pool are preserved. Subsequent
+                 generation and alignment reconstruct padding through their existing path.
+                 Returns one (before, after) pair per replica, each containing four tuples:
+                 (buffer name, shape, dtype, live bytes, reserved capacity bytes).
+                 This API is intended for a bounded instrumental memory probe.
+             )pbdoc")
+
         .def_property_readonly("device", &WhisperWrapper::device,
                                "Device this model is running on.")
         .def_property_readonly("device_index", &WhisperWrapper::device_index,
@@ -226,6 +270,8 @@ namespace ctranslate2 {
         .def("encode", &WhisperWrapper::encode,
              py::arg("features"),
              py::arg("to_cpu")=false,
+             py::kw_only(),
+             py::arg("allow_flash_attention")=true,
              py::call_guard<py::gil_scoped_release>(),
              R"pbdoc(
                  Encodes the input features.
@@ -234,6 +280,7 @@ namespace ctranslate2 {
                    features: Mel spectogram of the audio, as a float array with shape
                      ``[batch_size, n_mels, chunk_length]``.
                    to_cpu: Copy the encoder output to the CPU before returning the value.
+                   allow_flash_attention: Set to False to disable flash attention enabled at load time.
 
                  Returns:
                    The encoder output.
@@ -364,6 +411,8 @@ namespace ctranslate2 {
 
         .def_property_readonly("model_is_loaded", &WhisperWrapper::model_is_loaded,
                                "Whether the model is loaded on the initial device and ready to be used.")
+        .def_property_readonly("model_identity", &WhisperWrapper::model_identity,
+                               "Address of the model instance shared by the workers of this pool.")
         ;
     }
 

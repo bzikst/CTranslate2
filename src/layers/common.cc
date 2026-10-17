@@ -310,6 +310,26 @@ namespace ctranslate2 {
       return _partial_weight ? _partial_weight.dim(0) : _weight.dim(0);
     }
 
+    DenseDerivedBufferStats Dense::derived_buffer_stats() const {
+      const StorageView* buffers[] = {&_partial_weight, &_partial_bias, &_partial_qscale,
+                                      &_partial_u8_shift_compensation};
+      const char* names[] = {"weight", "bias", "qscale", "u8_shift_compensation"};
+      DenseDerivedBufferStats stats;
+      for (size_t i = 0; i < 4; ++i) {
+        const auto& buffer = *buffers[i];
+        stats.emplace_back(names[i], buffer.shape(), dtype_name(buffer.dtype()),
+                           buffer.size() * buffer.item_size(), buffer.reserved_memory());
+      }
+      return stats;
+    }
+
+    void Dense::release_derived_buffers() {
+      _partial_weight.release();
+      _partial_bias.release();
+      _partial_qscale.release();
+      _partial_u8_shift_compensation.release();
+    }
+
     void Dense::select_weights(const StorageView* index, const StorageView* extra_bias) {
       if (index) {
         if (_packed_weight)
